@@ -143,22 +143,23 @@ func downloadAndSend(bot *tgbotapi.BotAPI, chatID int64, url, mode string) error
 	outPattern := filepath.Join(tmpDir, "%(title)s.%(ext)s")
 
 	var args []string
-if mode == "audio" {
-    args = []string{"-f", "bestaudio", "-x", "--audio-format", "mp3", "-o", outPattern, url}
-} else {
-    args = []string{"-f", "bestvideo+bestaudio/best", "-o", outPattern, url}
-}
+	if mode == "audio" {
+		args = []string{"-f", "bestaudio", "-x", "--audio-format", "mp3", "-o", outPattern, url}
+	} else {
+		args = []string{"-f", "bestvideo+bestaudio/best", "-o", outPattern, url}
+	}
 
-// Если cookies.txt существует — добавляем в параметры
-cookiesPath := "/app/cookies.txt"
-if _, err := os.Stat(cookiesPath); err == nil {
-    args = append([]string{"--cookies", cookiesPath}, args...)
-}
+	// Если cookies.txt существует — добавляем в параметры
+	cookiesPath := "/app/cookies.txt"
+	if _, err := os.Stat(cookiesPath); err == nil {
+		args = append([]string{"--cookies", cookiesPath}, args...)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), ytTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	out, err := cmd.CombinedOutput()
+
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("время ожидания скачивания истекло (%s)", ytTimeout.String())
 	}
