@@ -1,0 +1,4 @@
+# Ignore local env files and binaries
+.env
+*.bin
+/bot
