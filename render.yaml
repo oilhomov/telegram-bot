@@ -11,9 +11,4 @@ services:
         sync: false
       - key: COOKIES_PATH
         value: /app/cookies.txt  # путь внутри контейнера (если используешь)
-      - key: MAX_FILE_SIZE
-        value: "2147483648"  # 2GB
-      - key: YTDLP_TIMEOUT_SECONDS
-        value: "600"
-      - key: PORT
-        value: "10000"
+
