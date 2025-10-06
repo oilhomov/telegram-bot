@@ -1,53 +1,27 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
-	"time"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-const defaultMaxFileSize = 2 * 1024 * 1024 * 1024 // 2GB
-const defaultYtdlpTimeout = 600                    // сек
-
-func getenvInt64(key string, def int64) int64 {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return i
-		}
-	}
-	return def
-}
-func getenvInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return def
-}
-
 func main() {
 	botToken := os.Getenv("BOT_TOKEN")
 	if botToken == "" {
-		log.Fatalln("Требуется BOT_TOKEN в окружении")
+		log.Fatal("❌ Переменная окружения BOT_TOKEN не установлена")
 	}
-	// COOKIES_PATH может быть пустым
-	cookiesPath := os.Getenv("COOKIES_PATH")
-	maxSize := getenvInt64("MAX_FILE_SIZE", int64(defaultMaxFileSize))
-	ytdlpTimeout := getenvInt("YTDLP_TIMEOUT_SECONDS", defaultYtdlpTimeout)
 
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		log.Fatalf("Ошибка создания бота: %v", err)
+		log.Fatalf("Ошибка при запуске бота: %v", err)
 	}
-	log.Printf("Бот запущен: @%s", bot.Self.UserName)
+
+	log.Printf("🤖 Бот запущен: @%s", bot.Self.UserName)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -57,130 +31,79 @@ func main() {
 		if update.Message == nil {
 			continue
 		}
-		// Обрабатываем команды параллельно
-		if update.Message.IsCommand() {
-			switch update.Message.Command() {
-			case "video":
-				go handleDownload(bot, update.Message, "video", cookiesPath, maxSize, ytdlpTimeout)
-			case "audio":
-				go handleDownload(bot, update.Message, "audio", cookiesPath, maxSize, ytdlpTimeout)
-			case "help":
-				sendHelp(bot, update.Message)
-			default:
-				_, _ = bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Неизвестная команда. Используй /help"))
-			}
+
+		text := update.Message.Text
+		chatID := update.Message.Chat.ID
+
+		switch {
+		case text == "/start":
+			msg := tgbotapi.NewMessage(chatID,
+				"👋 Привет! Я бот для скачивания видео с YouTube и Instagram.\n\n" +
+					"Просто отправь мне ссылку, и я предложу выбрать — скачать 🎥 видео или 🎵 аудио.")
+			bot.Send(msg)
+
+		case text == "/help":
+			msg := tgbotapi.NewMessage(chatID,
+				"📘 Доступные команды:\n" +
+					"/start — начать работу\n" +
+					"/help — справка\n\n" +
+					"Просто пришли ссылку на видео с YouTube или Instagram Reels.")
+			bot.Send(msg)
+
+		case strings.Contains(text, "youtube.com") || strings.Contains(text, "youtu.be") || strings.Contains(text, "instagram.com"):
+			// Кнопки выбора
+			videoBtn := tgbotapi.NewKeyboardButton("🎥 Видео")
+			audioBtn := tgbotapi.NewKeyboardButton("🎵 Аудио")
+			keyboard := tgbotapi.NewReplyKeyboard([]tgbotapi.KeyboardButton{videoBtn, audioBtn})
+			msg := tgbotapi.NewMessage(chatID, "Что хочешь скачать?")
+			msg.ReplyMarkup = keyboard
+			bot.Send(msg)
+
+			// Сохраняем ссылку для дальнейшего использования
+			go func(link string, chat int64) {
+				for upd := range updates {
+					if upd.Message == nil {
+						continue
+					}
+
+					choice := upd.Message.Text
+					if choice == "🎥 Видео" || choice == "🎵 Аудио" {
+						bot.Send(tgbotapi.NewMessage(chat, "⏳ Загружаю, подожди немного..."))
+
+						format := "best"
+						if choice == "🎵 Аудио" {
+							format = "bestaudio"
+						}
+
+						fileName := "output"
+						cmd := exec.Command("yt-dlp", "-f", format, "-o", fileName+".%(ext)s", link)
+						output, err := cmd.CombinedOutput()
+						if err != nil {
+							bot.Send(tgbotapi.NewMessage(chat, fmt.Sprintf("❌ Ошибка yt-dlp: %v\n%s", err, string(output))))
+							return
+						}
+
+						// Найдем файл по расширению
+						var ext string
+						if choice == "🎥 Видео" {
+							ext = ".mp4"
+						} else {
+							ext = ".m4a"
+						}
+
+						filePath := fileName + ext
+						video := tgbotapi.NewDocument(chat, tgbotapi.FilePath(filePath))
+						bot.Send(video)
+
+						os.Remove(filePath)
+						return
+					}
+				}
+			}(text, chatID)
+
+		default:
+			msg := tgbotapi.NewMessage(chatID, "❓ Неизвестная команда. Напиши /help, если нужно напоминание.")
+			bot.Send(msg)
 		}
 	}
-}
-
-func sendHelp(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
-	text := "🎬 Команды:\n" +
-		"/video <url> — скачать видео (YouTube, Instagram Reels, TikTok...)\n" +
-		"/audio <url> — скачать аудио в mp3\n\n" +
-		"Если нужен доступ к приватным/ограниченным видео — укажи COOKIES_PATH в переменных окружения."
-	_, _ = bot.Send(tgbotapi.NewMessage(msg.Chat.ID, text))
-}
-
-func handleDownload(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, mode string, cookiesPath string, maxSize int64, timeoutSeconds int) {
-	chatID := msg.Chat.ID
-	url := msg.CommandArguments()
-	if url == "" {
-		_, _ = bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("Использование: /%s <ссылка>", mode)))
-		return
-	}
-
-	statusMsg, _ := bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("📥 Начинаю %s: %s", mode, url)))
-
-	// Проверим cookies (если указан)
-	if cookiesPath != "" {
-		if _, err := os.Stat(cookiesPath); os.IsNotExist(err) {
-			_, _ = bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("⚠️ COOKIES не найден по пути %s — продолжу без авторизации", cookiesPath)))
-			cookiesPath = ""
-		}
-	}
-
-	// уникальная временная папка
-	tmpDir, err := os.MkdirTemp("", "tgdl-*")
-	if err != nil {
-		_, _ = bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err)))
-		return
-	}
-	defer os.RemoveAll(tmpDir)
-
-	outPattern := filepath.Join(tmpDir, "%(title)s.%(ext)s")
-
-	// сформируем args
-	var args []string
-	if mode == "audio" {
-		args = []string{"-f", "bestaudio", "-x", "--audio-format", "mp3", "-o", outPattern, url}
-	} else {
-		args = []string{"-f", "bestvideo+bestaudio/best", "-o", outPattern, url}
-	}
-	if cookiesPath != "" {
-		args = append([]string{"--cookies", cookiesPath}, args...)
-	}
-
-	// запустим yt-dlp с таймаутом
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	if err := cmd.Run(); err != nil {
-		_, _ = bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка yt-dlp: %v", err)))
-		return
-	}
-
-	// найдём последний файл
-	filePath, err := findLatestFile(tmpDir)
-	if err != nil {
-		_, _ = bot.Send(tgbotapi.NewMessage(chatID, "❌ Не найден файл после скачивания"))
-		return
-	}
-
-	// проверим размер
-	info, _ := os.Stat(filePath)
-	if info.Size() > maxSize {
-		_, _ = bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Файл слишком большой для отправки."))
-		return
-	}
-
-	_, _ = bot.Send(tgbotapi.NewMessage(chatID, "📤 Отправляю..."))
-	f := tgbotapi.FilePath(filePath)
-	doc := tgbotapi.NewDocument(chatID, f)
-	if _, err := bot.Send(doc); err != nil {
-		_, _ = bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка отправки: %v", err)))
-		return
-	}
-
-	_, _ = bot.Send(tgbotapi.NewMessage(chatID, "✅ Готово"))
-	// обновим статус сообщения
-	edit := tgbotapi.NewEditMessageText(chatID, statusMsg.MessageID, "✅ Завершено")
-if _, err := bot.Request(edit); err != nil {
-	log.Printf("Ошибка при обновлении сообщения: %v", err)
-}
-}
-
-func findLatestFile(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-	var latest string
-	var latestTime time.Time
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, _ := e.Info()
-		if info.ModTime().After(latestTime) {
-			latestTime = info.ModTime()
-			latest = filepath.Join(dir, e.Name())
-		}
-	}
-	if latest == "" {
-		return "", fmt.Errorf("нет файлов")
-	}
-	return latest, nil
 }
