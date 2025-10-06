@@ -10,7 +10,7 @@ import (
 
 func main() {
 	// Токен бота из переменной окружения
-	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	botToken := os.Getenv("BOT_TOKEN")
 	if botToken == "" {
 		log.Fatal("TELEGRAM_BOT_TOKEN is not set")
 	}
