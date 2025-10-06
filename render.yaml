@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: telegram-downloader-bot
+    env: docker
+    repo: your-github-username/telegram-bot
+    branch: main
+    dockerfilePath: Dockerfile
+    plan: free
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
