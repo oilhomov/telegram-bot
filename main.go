@@ -75,9 +75,7 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 		return
 	}
 
-	// Save URL in chat context (in-memory) by message ID (simple approach)
-	// We'll use callback data to pass the URL via ephemeral storage: store on file per chat is unnecessary here.
-	// Simpler: include the URL in the callback data is unsafe (too long). Instead we use a temp file map — but for simplicity we'll store in a simple file under /tmp keyed by chatID.
+	// сохраняем ссылку временно
 	keyFile := filepath.Join(os.TempDir(), fmt.Sprintf("tgurl_%d.txt", chatID))
 	_ = os.WriteFile(keyFile, []byte(text), 0600)
 
@@ -99,7 +97,7 @@ func handleCallback(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	data := cb.Data
 
-	// acknowledge callback to remove loader
+	// acknowledge callback
 	ack := tgbotapi.NewCallback(cb.ID, "Запрос принят — начинаю загрузку...")
 	if _, err := bot.Request(ack); err != nil {
 		log.Printf("callback ack failed: %v", err)
@@ -118,17 +116,14 @@ func handleCallback(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	// inform user
 	format := strings.TrimPrefix(data, "download:")
 	bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("Начинаю %s для: %s", format, url)))
 
-	// run download in goroutine
 	go func() {
 		if err := downloadAndSend(bot, chatID, url, format); err != nil {
 			log.Printf("download/send error: %v", err)
 			bot.Send(tgbotapi.NewMessage(chatID, "Ошибка: "+err.Error()))
 		}
-		// remove stored url after job
 		_ = os.Remove(keyFile)
 	}()
 }
@@ -141,17 +136,8 @@ func downloadAndSend(bot *tgbotapi.BotAPI, chatID int64, url, mode string) error
 	defer os.RemoveAll(tmpDir)
 
 	outPattern := filepath.Join(tmpDir, "%(title)s.%(ext)s")
-	func runYTDLP(url string) error {
-	cookies := os.Getenv("YTDLP_COOKIES")
-	cookieFile := "/app/cookies.txt"
 
-	if cookies != "" {
-		err := os.WriteFile(cookieFile, []byte(cookies), 0644)
-		if err != nil {
-			return err
-		}
-	}
-
+	// собираем аргументы
 	var args []string
 	if mode == "audio" {
 		args = []string{"-f", "bestaudio", "-x", "--audio-format", "mp3", "-o", outPattern, url}
@@ -159,12 +145,17 @@ func downloadAndSend(bot *tgbotapi.BotAPI, chatID int64, url, mode string) error
 		args = []string{"-f", "bestvideo+bestaudio/best", "-o", outPattern, url}
 	}
 
-	// Если cookies.txt существует — добавляем в параметры
-	cookiesPath := "/app/cookies.txt"
-	if _, err := os.Stat(cookiesPath); err == nil {
-		args = append([]string{"--cookies", cookiesPath}, args...)
+	// добавляем cookies, если есть
+	cookies := os.Getenv("YTDLP_COOKIES")
+	cookieFile := "/app/cookies.txt"
+	if cookies != "" {
+		err := os.WriteFile(cookieFile, []byte(cookies), 0644)
+		if err == nil {
+			args = append([]string{"--cookies", cookieFile}, args...)
+		}
 	}
 
+	// запускаем yt-dlp
 	ctx, cancel := context.WithTimeout(context.Background(), ytTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
@@ -190,7 +181,6 @@ func downloadAndSend(bot *tgbotapi.BotAPI, chatID int64, url, mode string) error
 		return fmt.Errorf("файл слишком большой для отправки через Telegram (>2GB). Размер: %d", info.Size())
 	}
 
-	// notify uploading
 	bot.Send(tgbotapi.NewMessage(chatID, "📤 Загружаю в Telegram..."))
 
 	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(filePath))
