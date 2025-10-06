@@ -76,7 +76,8 @@ func main() {
 						}
 
 						fileName := "output"
-						cmd := exec.Command("yt-dlp", "-f", format, "-o", fileName+".%(ext)s", link)
+						cmd := exec.Command("yt-dlp", "--cookies", "cookies.json", "-f", format, "-o", fileName+".%(ext)s", link)
+
 						output, err := cmd.CombinedOutput()
 						if err != nil {
 							bot.Send(tgbotapi.NewMessage(chat, fmt.Sprintf("❌ Ошибка yt-dlp: %v\n%s", err, string(output))))
