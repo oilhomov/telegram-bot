@@ -156,13 +156,10 @@ func handleDownload(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, mode string, co
 
 	_, _ = bot.Send(tgbotapi.NewMessage(chatID, "✅ Готово"))
 	// обновим статус сообщения
-	_, _ = bot.EditMessageText(tgbotapi.EditMessageTextConfig{
-		BaseEdit: tgbotapi.BaseEdit{
-			ChatID:    chatID,
-			MessageID: statusMsg.MessageID,
-		},
-		Text: "Завершено",
-	})
+	edit := tgbotapi.NewEditMessageText(chatID, statusMsg.MessageID, "✅ Завершено")
+if _, err := bot.Request(edit); err != nil {
+	log.Printf("Ошибка при обновлении сообщения: %v", err)
+}
 }
 
 func findLatestFile(dir string) (string, error) {
