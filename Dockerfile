@@ -1,27 +1,24 @@
+# Сборка бота
+FROM golang:1.22 AS builder
+WORKDIR /app
+COPY . .
+RUN go mod download
+RUN go build -o bot main.go
+
 # Финальный образ
 FROM debian:bullseye-slim
-
 WORKDIR /app
 
-# Устанавливаем зависимости для yt-dlp
-RUN apt-get update && apt-get install -y \
-    curl ffmpeg python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+# Устанавливаем yt-dlp
+RUN apt-get update && apt-get install -y curl ffmpeg python3 \
+    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod +x /usr/local/bin/yt-dlp
 
-# Ставим последнюю версию yt-dlp
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-    -o /usr/local/bin/yt-dlp \
-    && chmod a+rx /usr/local/bin/yt-dlp
-
-# Копируем бинарник бота
+# Копируем бинарь бота
 COPY --from=builder /app/bot /app/bot
 
-# Если в переменной окружения есть cookies, сохраняем их в файл
-RUN echo '#!/bin/sh\n\
-if [ ! -z "$YTDLP_COOKIES" ]; then\n\
-  echo "$YTDLP_COOKIES" > /app/cookies.txt\n\
-fi\n\
-exec /app/bot' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Если есть переменная окружения с cookies — сохраняем в файл
+ENV YTDLP_COOKIES=""
+RUN if [ -n "$YTDLP_COOKIES" ]; then echo "$YTDLP_COOKIES" > /app/cookies.txt; fi
 
-# Запускаем через entrypoint
-CMD ["/app/entrypoint.sh"]
+CMD ["/app/bot"]
