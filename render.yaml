@@ -2,10 +2,18 @@ services:
   - type: web
     name: telegram-downloader-bot
     env: docker
-    repo: your-github-username/telegram-bot
+    repo: OtabekIlhomov/yt-insta-bot  # 👉 замени на свой GitHub репозиторий
     branch: main
     dockerfilePath: Dockerfile
     plan: free
     envVars:
       - key: BOT_TOKEN
         sync: false
+      - key: COOKIES_PATH
+        value: /app/cookies.txt  # путь внутри контейнера (если используешь)
+      - key: MAX_FILE_SIZE
+        value: "2147483648"  # 2GB
+      - key: YTDLP_TIMEOUT_SECONDS
+        value: "600"
+      - key: PORT
+        value: "10000"
