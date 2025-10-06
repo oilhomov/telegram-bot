@@ -1,21 +1,27 @@
-# builder stage
-FROM golang:1.23-alpine AS builder
-
-RUN apk add --no-cache git build-base ffmpeg yt-dlp
+# Финальный образ
+FROM debian:bullseye-slim
 
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go env -w GOPROXY=https://proxy.golang.org,direct
-RUN go mod download
 
-COPY . .
-RUN go build -o /bot main.go
+# Устанавливаем зависимости для yt-dlp
+RUN apt-get update && apt-get install -y \
+    curl ffmpeg python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 
-# final stage
-FROM alpine:3.18
-RUN apk add --no-cache ffmpeg yt-dlp ca-certificates
-WORKDIR /root/
-COPY --from=builder /bot /root/bot
-# create temp dir
-RUN mkdir -p /tmp
-CMD ["/root/bot"]
+# Ставим последнюю версию yt-dlp
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+    -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp
+
+# Копируем бинарник бота
+COPY --from=builder /app/bot /app/bot
+
+# Если в переменной окружения есть cookies, сохраняем их в файл
+RUN echo '#!/bin/sh\n\
+if [ ! -z "$YTDLP_COOKIES" ]; then\n\
+  echo "$YTDLP_COOKIES" > /app/cookies.txt\n\
+fi\n\
+exec /app/bot' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Запускаем через entrypoint
+CMD ["/app/entrypoint.sh"]
