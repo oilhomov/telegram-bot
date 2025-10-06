@@ -1,36 +1,17 @@
-# Этап сборки Go
-FROM golang:1.22 AS builder
-
+# build stage
+FROM golang:1.21-bullseye AS builder
 WORKDIR /app
-
-# Копируем модули отдельно (чтобы кешировались)
 COPY go.mod go.sum ./
 RUN go mod download
-
-# Копируем весь проект
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /tgloader
 
-# Сборка статического бинаря (без зависимостей от glibc)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bot main.go
-
-# Финальный минимальный образ
-FROM alpine:latest
-
-WORKDIR /app
-
-# Устанавливаем зависимости для yt-dlp
-RUN apk add --no-cache curl ffmpeg python3
-
-# Скачиваем последнюю версию yt-dlp
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-    -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp
-
-# Копируем бинарь бота
-COPY --from=builder /app/bot /app/bot
-
-# Если будут cookies через переменную окружения, можно сохранить
-ENV YTDLP_COOKIES=""
-RUN if [ -n "$YTDLP_COOKIES" ]; then echo "$YTDLP_COOKIES" > /app/cookies.txt; fi
-
-# Запуск бота
-CMD ["/app/bot"]
+# runtime stage: slim image + python (for yt-dlp)
+FROM python:3.11-slim
+# установим yt-dlp и ffmpeg (ffmpeg нужен для конвертации/merge)
+RUN apt-get update && apt-get install -y ffmpeg git && pip install --no-cache-dir yt-dlp && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /tgloader /tgloader
+# рабочая директория
+WORKDIR /data
+# точка входа
+ENTRYPOINT ["/tgloader"]
